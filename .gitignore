@@ -1,0 +1,31 @@
+# Python/Backend
+venv/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+
+# Node/Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.npm/
+npm-debug.log
+yarn-error.log
+
+# VS Code / IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Data files
+*.csv
+*.txt
+
+# OS Files
+.DS_Store
+Thumbs.db
