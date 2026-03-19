@@ -4,7 +4,7 @@ import io
 import alphashape
 from pyproj import Transformer
 
-transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+transformer = Transformer.from_crs("EPSG:4326", "EPSG:32648", always_xy=True)
 
 def convert_to_meter(lon, lat):
     if -180 <= lon <= 180 and -90 <= lat <= 90:
@@ -59,13 +59,16 @@ def parse_file(content, filename, point_type="vach"):
             if len(parts) >= 3:
                 point_id = parts[0]
                 try:
-                    x = float(parts[1])
-                    y = float(parts[2])
-                    x, y = convert_to_meter(x, y)
+                    # VN survey TXT format: ID  Northing  Easting  Z  [code]
+                    # Northing = Y axis, Easting = X axis
+                    northing = float(parts[1])  # Y
+                    easting  = float(parts[2])  # X
+                    # If already in local metres (>500), keep as-is; else convert from lon/lat
+                    x, y = convert_to_meter(easting, northing)
                     points.append({
                         "id": point_id,
-                        "x": x,
-                        "y": y
+                        "x": x,   # Easting
+                        "y": y    # Northing
                     })
                 except ValueError:
                     raise ValueError(f"File {filename} contains invalid coordinates (NaN or non-numeric).")
