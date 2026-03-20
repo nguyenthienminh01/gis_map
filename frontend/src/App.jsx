@@ -178,21 +178,20 @@ export default function App() {
     }
 
     const poles = results.classification || [];
-    const x_vals = poles.map(p => p.x);
-    const y_vals = poles.map(p => p.y);
-    const text = poles.map(p => {
-      let desc = `Pole ID: ${p.id}<br>Status: ${p.status}<br>Dist: ${p.distance}m`;
-      if (p.is_min_violation) desc += "<br><br><b>MIN VIOLATION</b>";
-      if (p.is_max_violation) desc += "<br><br><b>MAX VIOLATION</b>";
-      return desc;
-    });
 
-    const colors = poles.map(p => {
-      if (p.is_max_violation) return "#a855f7";
-      if (p.is_min_violation) return "#eab308";
-      return p.status === "INSIDE" ? "#10b981" : "#ef4444";
-    });
-    const sizes = poles.map(p => (p.is_max_violation || p.is_min_violation) ? 14 : 8);
+    // Separate normal poles from violation poles for cleaner rendering
+    const normalPoles   = poles.filter(p => !p.is_min_violation && !p.is_max_violation);
+    const violationPoles = poles.filter(p => p.is_min_violation || p.is_max_violation);
+
+    const makeText = p => {
+      let desc = `Pole ID: ${p.id}<br>Status: ${p.status}<br>Dist: ${p.distance}m`;
+      if (p.is_min_violation) desc += "<br><b>⚠ MIN VIOLATION</b>";
+      if (p.is_max_violation) desc += "<br><b>⚠ MAX VIOLATION</b>";
+      return desc;
+    };
+
+    const normalColor  = p => p.status === "INSIDE" ? "rgba(16,185,129,0.65)" : "rgba(239,68,68,0.65)";
+    const violationColor = p => p.is_max_violation ? "rgba(168,85,247,0.9)" : "rgba(234,179,8,0.9)";
     
     let final_bounds = null;
     if (tifData && tifData.bounds) {
@@ -243,10 +242,11 @@ export default function App() {
         {
           type: 'path',
           path: pathStr,
-          fillcolor: 'rgba(59, 130, 246, 0.15)',
+          fillcolor: 'rgba(59, 130, 246, 0.08)',   // lighter fill – shows satellite beneath
           line: {
-            color: 'rgb(59, 130, 246)',
-            width: 2
+            color: 'rgba(99, 179, 237, 0.95)',     // bright cyan-blue – clearly visible
+            width: 2.5,
+            dash: 'solid'
           }
         }
       ] : []
@@ -255,16 +255,34 @@ export default function App() {
     return (
       <Plot
         data={[
+          // Layer 1: Normal INSIDE / OUTSIDE poles (small, semi-transparent, no border)
           {
-            x: x_vals,
-            y: y_vals,
+            x: normalPoles.map(p => p.x),
+            y: normalPoles.map(p => p.y),
             mode: 'markers',
             type: 'scatter',
-            text: text,
+            name: 'Poles',
+            text: normalPoles.map(makeText),
             hoverinfo: 'text',
             marker: {
-              size: sizes,
-              color: colors,
+              size: 5,
+              color: normalPoles.map(normalColor),
+              line: { width: 0 }   // no border – less noise
+            }
+          },
+          // Layer 2: Violation poles (larger star, fully opaque, clearly visible)
+          {
+            x: violationPoles.map(p => p.x),
+            y: violationPoles.map(p => p.y),
+            mode: 'markers',
+            type: 'scatter',
+            name: 'Violations',
+            text: violationPoles.map(makeText),
+            hoverinfo: 'text',
+            marker: {
+              size: 12,
+              symbol: 'star',
+              color: violationPoles.map(violationColor),
               line: { color: 'white', width: 1 }
             }
           }
