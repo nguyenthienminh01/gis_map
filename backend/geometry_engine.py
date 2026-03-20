@@ -3,6 +3,7 @@ import pandas as pd
 import io
 import alphashape
 from pyproj import Transformer
+import math
 
 transformer = Transformer.from_crs("EPSG:4326", "EPSG:32648", always_xy=True)
 
@@ -65,6 +66,13 @@ def parse_file(content, filename, point_type="vach"):
                     easting  = float(parts[2])  # X
                     # If already in local metres (>500), keep as-is; else convert from lon/lat
                     x, y = convert_to_meter(easting, northing)
+                    
+                    if point_type == "vach":
+                        # Use ONLY points marked "E" from Vach.txt
+                        code = parts[-1]
+                        if code != "E":
+                            continue
+                            
                     points.append({
                         "id": point_id,
                         "x": x,   # Easting
@@ -78,10 +86,12 @@ def parse_file(content, filename, point_type="vach"):
     else:
         raise ValueError(f"Unsupported file extension for {filename}")
 
-def compute_analysis(boundary_points, pole_points):
+def compute_analysis(boundary_points, pole_points, allow_fix=False):
     if not boundary_points:
         return {"poles": [], "summary": {"total": 0, "inside": 0, "outside": 0, "avg_distance": 0, "min_distance": 0, "max_distance": 0}, "boundary_hull": []}
-        
+
+    # DO NOT sort boundary points by angle or centroid.
+    # Use the original order of points from Vach.txt (Code = "E") as-is.
     poly_coords = [(p["x"], p["y"]) for p in boundary_points]
     
     if len(poly_coords) < 3:
@@ -91,8 +101,25 @@ def compute_analysis(boundary_points, pole_points):
         poly_coords.append(poly_coords[0])
         
     polygon = Polygon(poly_coords)
+    
+    # Validation: check polygon validity WITHOUT auto-fixing
+    if not polygon.is_valid:
+        print("WARNING: Invalid boundary geometry detected. Boundary points may be ordered incorrectly or self-intersecting.")
+        # Only apply buffer(0) fix if explicitly enabled by caller
+        if allow_fix:
+            print("INFO: allow_fix=True → Applying buffer(0) to repair geometry.")
+            polygon = polygon.buffer(0)
+        # else: proceed with original (potentially invalid) polygon as-is
 
-    hull_coords = [{"x": x, "y": y} for x, y in polygon.exterior.coords]
+    # Fallback gracefully if polygon is empty
+    if polygon.is_empty:
+        return {"poles": [], "summary": {"total": len(pole_points), "inside": 0, "outside": len(pole_points), "avg_distance": 0, "min_distance": 0, "max_distance": 0}, "boundary_hull": []}
+        
+    if polygon.geom_type == 'Polygon':
+        hull_coords = [{"x": x, "y": y} for x, y in polygon.exterior.coords]
+    else:
+        # For MultiPolygon (only when allow_fix=True), return coords of the convex hull to visualize
+        hull_coords = [{"x": x, "y": y} for x, y in polygon.convex_hull.exterior.coords]
     
     results = []
     inside_count = 0
@@ -102,8 +129,11 @@ def compute_analysis(boundary_points, pole_points):
     
     for p in pole_points:
         pt = Point(p["x"], p["y"])
-        is_inside = polygon.contains(pt)
-        distance = pt.distance(polygon)
+        is_inside = polygon.covers(pt)
+        
+        # Calculate distance to the boundary
+        boundary_geom = polygon.exterior if polygon.geom_type == 'Polygon' else polygon.boundary
+        distance = pt.distance(boundary_geom)
         
         status = "INSIDE" if is_inside else "OUTSIDE"
         if is_inside:
@@ -122,10 +152,18 @@ def compute_analysis(boundary_points, pole_points):
             "distance": round(distance, 4)
         })
         
-    outside_distances = [d for d in all_distances if d > 0]
-    min_dist = min(outside_distances) if outside_distances else 0
+    # DO NOT exclude zero distances
+    min_dist = min(all_distances) if all_distances else 0
     max_dist = max(all_distances) if all_distances else 0
     avg_distance = (sum(all_distances) / len(all_distances)) if all_distances else 0
+
+    # Validation rules logic logging (optional logic warnings based on requirements)
+    total_poles = len(pole_points)
+    if total_poles > 0 and (inside_count / total_poles) < 0.05:
+        print(f"WARNING: Inside count ({inside_count}) < 5% of Total ({total_poles}) -> polygon might be ordered incorrectly.")
+        
+    if min_dist > 0 and inside_count > 0:
+        print(f"WARNING: Min Distance ({min_dist}) > 0 despite being inside -> distance might not be computed to boundary correctly.")
 
     for r in results:
         r["is_min_violation"] = (r["status"] == "OUTSIDE" and r["raw_distance"] == min_dist and min_dist > 0)
@@ -136,7 +174,7 @@ def compute_analysis(boundary_points, pole_points):
         "poles": results,
         "boundary_hull": hull_coords,
         "summary": {
-            "total": len(pole_points),
+            "total": total_poles,
             "inside": inside_count,
             "outside": outside_count,
             "min_distance": round(min_dist, 4),
